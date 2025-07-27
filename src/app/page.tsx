@@ -1,103 +1,170 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
+import Sidebar from "@/components/Sidebar";
+import { Job, Contractor, WebhookPayload } from "@/app/types";
+import toast, { Toaster } from "react-hot-toast";
+
+// Dynamically import the MapComponent to ensure it's only rendered on the client side
+const MapWithNoSSR = dynamic(() => import("../components/Map"), {
+  ssr: false,
+});
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Fetch initial jobs data
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/api/jobs'); // Use local proxy API
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const jobsData: Job[] = await response.json();
+        
+        // Convert string coordinates to numbers for consistent handling
+        const normalizedJobs = jobsData.map(job => ({
+          ...job,
+          latitude: typeof job.latitude === 'string' ? parseFloat(job.latitude) : job.latitude,
+          longitude: typeof job.longitude === 'string' ? parseFloat(job.longitude) : job.longitude,
+        }));
+        
+        setJobs(normalizedJobs);
+        toast.success(`Loaded ${normalizedJobs.length} jobs from API`);
+      } catch (error) {
+        console.error('Error fetching jobs:', error);
+        toast.error('Failed to load jobs from API');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchJobs();
+  }, []);
+
+  useEffect(() => {
+    // Establish connection to the Server-Sent Events endpoint
+    const eventSource = new EventSource("/api/events");
+
+    eventSource.onopen = () => {
+      console.log("SSE connection established");
+      setIsConnected(true);
+      toast.success("Connected to live updates!");
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const parsedData: WebhookPayload | { type: "connected" } = JSON.parse(
+          event.data
+        );
+
+        if ("type" in parsedData && parsedData.type === "connected") {
+          return; // Skip connection confirmation message
+        }
+
+        const payload = parsedData as WebhookPayload;
+        const updatedJob = {
+          ...payload.data,
+          latitude: typeof payload.data.latitude === 'string' ? parseFloat(payload.data.latitude) : payload.data.latitude,
+          longitude: typeof payload.data.longitude === 'string' ? parseFloat(payload.data.longitude) : payload.data.longitude,
+        };
+
+        setJobs((prevJobs) => {
+          const jobExists = prevJobs.some((job) => job.id === updatedJob.id);
+          if (jobExists) {
+            // Update existing job
+            return prevJobs.map((job) =>
+              job.id === updatedJob.id ? updatedJob : job
+            );
+          } else {
+            // Add new job
+            return [...prevJobs, updatedJob];
+          }
+        });
+
+        if (payload.event === "new-job") {
+          toast.success(`New Job Added: ${updatedJob.title}`);
+        } else {
+          toast(`Job Updated: ${updatedJob.title} is now ${updatedJob.status}`);
+        }
+      } catch (error) {
+        console.error("Error parsing SSE message:", error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error("SSE connection error:", error);
+      toast.error("Disconnected from live updates. Retrying...");
+      setIsConnected(false);
+    };
+
+    // Cleanup on component unmount
+    return () => {
+      console.log("Closing SSE connection");
+      eventSource.close();
+    };
+  }, []);
+
+  const contractors = useMemo(() => {
+    const contractorMap = new Map<string, number>();
+    jobs.forEach((job) => {
+      if (job.contractor) {
+        contractorMap.set(
+          job.contractor,
+          (contractorMap.get(job.contractor) || 0) + 1
+        );
+      }
+    });
+
+    const sortedContractors: Contractor[] = Array.from(contractorMap.entries())
+      .map(([name, assignedJobs]) => ({ name, assignedJobs }))
+      .sort((a, b) => b.assignedJobs - a.assignedJobs);
+
+    return sortedContractors;
+  }, [jobs]);
+
+  return (
+    <main className="flex h-screen w-screen bg-gray-100">
+      <Toaster position="top-center" />
+      <div className="flex-grow h-full relative">
+        <div className="absolute top-4 left-4 z-[1000] px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
+          <div className="flex items-center space-x-2">
+            <span
+              className={`h-3 w-3 rounded-full inline-block ${
+                isConnected
+                  ? "bg-green-400 shadow-green-400/50 shadow-lg animate-pulse"
+                  : "bg-red-400 shadow-red-400/50 shadow-lg"
+              }`}
+            ></span>
+            <span
+              className={`text-sm font-medium ${
+                isConnected ? "text-green-300" : "text-red-300"
+              }`}
+            >
+              {isConnected ? "Live Updates" : "Disconnected"}
+            </span>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        
+        {/* Jobs count indicator */}
+        <div className="absolute top-4 right-4 z-[1000] px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm font-medium text-blue-300">
+              {isLoading ? "Loading..." : `${jobs.length} Jobs`}
+            </span>
+          </div>
+        </div>
+        
+        <MapWithNoSSR jobs={jobs} />
+      </div>
+      <aside className="w-full md:w-1/3 lg:w-1/4 h-full shadow-lg">
+        <Sidebar jobs={jobs} contractors={contractors} />
+      </aside>
+    </main>
   );
 }

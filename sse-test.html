@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSE Connection Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #1f2937;
+        color: #fff;
+      }
+      .status {
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+      }
+      .connected {
+        background-color: #065f46;
+      }
+      .disconnected {
+        background-color: #7f1d1d;
+      }
+      .event {
+        background-color: #374151;
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 5px;
+        border-left: 4px solid #3b82f6;
+      }
+      button {
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        margin: 5px;
+      }
+      button:hover {
+        background-color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SSE Connection Test</h1>
+    <div id="status" class="status disconnected">Disconnected</div>
+
+    <div>
+      <button onclick="testNewJob()">Send New Job</button>
+      <button onclick="testStatusUpdate()">Send Status Update</button>
+      <button onclick="clearEvents()">Clear Events</button>
+    </div>
+
+    <h2>Received Events:</h2>
+    <div id="events"></div>
+
+    <script>
+      const statusDiv = document.getElementById("status");
+      const eventsDiv = document.getElementById("events");
+      let eventSource;
+
+      function connectSSE() {
+        eventSource = new EventSource("http://localhost:3002/api/events");
+
+        eventSource.onopen = function () {
+          statusDiv.textContent = "Connected to SSE";
+          statusDiv.className = "status connected";
+          console.log("SSE Connected");
+        };
+
+        eventSource.onmessage = function (event) {
+          console.log("SSE Message received:", event.data);
+          const eventDiv = document.createElement("div");
+          eventDiv.className = "event";
+          eventDiv.innerHTML = `
+                    <strong>Time:</strong> ${new Date().toLocaleTimeString()}<br>
+                    <strong>Data:</strong> <pre>${JSON.stringify(
+                      JSON.parse(event.data),
+                      null,
+                      2
+                    )}</pre>
+                `;
+          eventsDiv.insertBefore(eventDiv, eventsDiv.firstChild);
+        };
+
+        eventSource.onerror = function () {
+          statusDiv.textContent = "SSE Connection Error";
+          statusDiv.className = "status disconnected";
+          console.log("SSE Error");
+        };
+      }
+
+      function testNewJob() {
+        const payload = {
+          event: "new-job",
+          data: {
+            id: Math.floor(Math.random() * 1000),
+            title: `Test Job ${new Date().toLocaleTimeString()}`,
+            status: "new",
+            contractor: null,
+            latitude: 40.7128 + (Math.random() - 0.5) * 0.1,
+            longitude: -74.006 + (Math.random() - 0.5) * 0.1,
+            address: `${Math.floor(Math.random() * 999)} Test St, New York, NY`,
+          },
+        };
+
+        fetch("http://localhost:3002/api/events/webhook", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        })
+          .then((response) => response.json())
+          .then((data) => console.log("Webhook response:", data))
+          .catch((error) => console.error("Error:", error));
+      }
+
+      function testStatusUpdate() {
+        const payload = {
+          event: "status-update",
+          data: {
+            id: Math.floor(Math.random() * 100),
+            title: "Updated Test Job",
+            status: "assigned",
+            contractor: "John Doe",
+            latitude: 40.7128,
+            longitude: -74.006,
+            address: "123 Updated St, New York, NY",
+          },
+        };
+
+        fetch("http://localhost:3002/api/events/webhook", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        })
+          .then((response) => response.json())
+          .then((data) => console.log("Webhook response:", data))
+          .catch((error) => console.error("Error:", error));
+      }
+
+      function clearEvents() {
+        eventsDiv.innerHTML = "";
+      }
+
+      // Start SSE connection when page loads
+      connectSSE();
+    </script>
+  </body>
+</html>
