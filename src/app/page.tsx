@@ -4,6 +4,10 @@ import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import Sidebar from "@/components/Sidebar";
 import { Job, Contractor, WebhookPayload } from "@/app/types";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { LogOut, User } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 // Dynamically import the MapComponent to ensure it's only rendered on the client side
@@ -15,30 +19,37 @@ export default function Home() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const { user, logout } = useAuth();
 
   // Fetch initial jobs data
   useEffect(() => {
     const fetchJobs = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch('/api/jobs'); // Use local proxy API
+        const response = await fetch("/api/jobs"); // Use local proxy API
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const jobsData: Job[] = await response.json();
-        
+
         // Convert string coordinates to numbers for consistent handling
-        const normalizedJobs = jobsData.map(job => ({
+        const normalizedJobs = jobsData.map((job) => ({
           ...job,
-          latitude: typeof job.latitude === 'string' ? parseFloat(job.latitude) : job.latitude,
-          longitude: typeof job.longitude === 'string' ? parseFloat(job.longitude) : job.longitude,
+          latitude:
+            typeof job.latitude === "string"
+              ? parseFloat(job.latitude)
+              : job.latitude,
+          longitude:
+            typeof job.longitude === "string"
+              ? parseFloat(job.longitude)
+              : job.longitude,
         }));
-        
+
         setJobs(normalizedJobs);
         toast.success(`Loaded ${normalizedJobs.length} jobs from API`);
       } catch (error) {
-        console.error('Error fetching jobs:', error);
-        toast.error('Failed to load jobs from API');
+        console.error("Error fetching jobs:", error);
+        toast.error("Failed to load jobs from API");
       } finally {
         setIsLoading(false);
       }
@@ -70,8 +81,14 @@ export default function Home() {
         const payload = parsedData as WebhookPayload;
         const updatedJob = {
           ...payload.data,
-          latitude: typeof payload.data.latitude === 'string' ? parseFloat(payload.data.latitude) : payload.data.latitude,
-          longitude: typeof payload.data.longitude === 'string' ? parseFloat(payload.data.longitude) : payload.data.longitude,
+          latitude:
+            typeof payload.data.latitude === "string"
+              ? parseFloat(payload.data.latitude)
+              : payload.data.latitude,
+          longitude:
+            typeof payload.data.longitude === "string"
+              ? parseFloat(payload.data.longitude)
+              : payload.data.longitude,
         };
 
         setJobs((prevJobs) => {
@@ -129,42 +146,65 @@ export default function Home() {
   }, [jobs]);
 
   return (
-    <main className="flex h-screen w-screen bg-gray-100">
-      <Toaster position="top-center" />
-      <div className="flex-grow h-full relative">
-        <div className="absolute top-4 left-4 z-[1000] px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
-          <div className="flex items-center space-x-2">
-            <span
-              className={`h-3 w-3 rounded-full inline-block ${
-                isConnected
-                  ? "bg-green-400 shadow-green-400/50 shadow-lg animate-pulse"
-                  : "bg-red-400 shadow-red-400/50 shadow-lg"
-              }`}
-            ></span>
-            <span
-              className={`text-sm font-medium ${
-                isConnected ? "text-green-300" : "text-red-300"
-              }`}
-            >
-              {isConnected ? "Live Updates" : "Disconnected"}
-            </span>
+    <ProtectedRoute>
+      <main className="flex h-screen w-screen bg-gray-100">
+        <Toaster position="top-center" />
+        <div className="flex-grow h-full relative">
+          {/* User info and logout */}
+          <div className="absolute top-4 left-4 z-[1000] flex gap-2">
+            <div className="px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
+              <div className="flex items-center space-x-2">
+                <span
+                  className={`h-3 w-3 rounded-full inline-block ${
+                    isConnected
+                      ? "bg-green-400 shadow-green-400/50 shadow-lg animate-pulse"
+                      : "bg-red-400 shadow-red-400/50 shadow-lg"
+                  }`}
+                ></span>
+                <span
+                  className={`text-sm font-medium ${
+                    isConnected ? "text-green-300" : "text-red-300"
+                  }`}
+                >
+                  {isConnected ? "Live Updates" : "Disconnected"}
+                </span>
+              </div>
+            </div>
+
+            {/* User info */}
+            <div className="px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
+              <div className="flex items-center space-x-2">
+                <User className="h-4 w-4 text-blue-300" />
+                <span className="text-sm font-medium text-blue-300">
+                  {user?.username || "User"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-red-300 hover:text-red-200 hover:bg-red-900/20"
+                  onClick={logout}
+                >
+                  <LogOut className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
-        
-        {/* Jobs count indicator */}
-        <div className="absolute top-4 right-4 z-[1000] px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-blue-300">
-              {isLoading ? "Loading..." : `${jobs.length} Jobs`}
-            </span>
+
+          {/* Jobs count indicator */}
+          <div className="absolute top-4 right-4 z-[1000] px-3 py-2 rounded-lg bg-gray-800 shadow-xl border border-gray-700">
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-medium text-blue-300">
+                {isLoading ? "Loading..." : `${jobs.length} Jobs`}
+              </span>
+            </div>
           </div>
+
+          <MapWithNoSSR jobs={jobs} />
         </div>
-        
-        <MapWithNoSSR jobs={jobs} />
-      </div>
-      <aside className="w-full md:w-1/3 lg:w-1/4 h-full shadow-lg">
-        <Sidebar jobs={jobs} contractors={contractors} />
-      </aside>
-    </main>
+        <aside className="w-full md:w-1/3 lg:w-1/4 h-full shadow-lg">
+          <Sidebar jobs={jobs} contractors={contractors} />
+        </aside>
+      </main>
+    </ProtectedRoute>
   );
 }
